@@ -1,6 +1,5 @@
 const prisma = require('../config/prisma');
 
-// --- 1. GET ALL SERVICES ---
 const getAllServices = async (req, res) => {
     try {
         const services = await prisma.service.findMany({
