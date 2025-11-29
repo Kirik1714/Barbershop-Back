@@ -77,7 +77,21 @@ const loginUser = async (req, res) => {
   }
 };
 
+const getMaster = async(req,res)=>{
+  try {
+    const masters =await prisma.user.findMany({
+      where:{role:'MASTER'}
+    });
+    return res.json({data:masters})
+  } catch (error) {
+      console.error('Ошибка при получении мастеров:', error);
+    
+        res.status(500).json({ error: 'Не удалось получить мастеров' });
+  }
+}
+
 module.exports = {
   registerUser,
   loginUser,
+  getMaster
 };
