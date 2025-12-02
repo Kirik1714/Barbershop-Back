@@ -7,57 +7,102 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+//
+// Роли пользователей
+//
 enum Role {
   USER
   MASTER
   ADMIN
 }
 
+//
+// Пользователи: клиенты и мастера
+//
 model User {
-  id        Int        @id @default(autoincrement())
-  email      String?
-  name     String?  
+  id           Int       @id @default(autoincrement())
+  email        String?   @unique
+  name         String?
   passwordHash String?
-  role      Role        @default(USER)
-  createdAt DateTime    @default(now())
-     photoUrl  String?     
+  role         Role      @default(USER)
+  photoUrl     String?
+  createdAt    DateTime  @default(now())
 
+  // Записи клиента
+  appointments     Appointment[] @relation("UserAppointments")
 
+  // Записи к мастеру
+  masterBookings   Appointment[] @relation("MasterAppointments")
 
-  // связи
-  appointments Appointment[] @relation("UserAppointments")
-  masterAppointments Appointment[] @relation("MasterAppointments")
+  // Регулярное расписание мастера
+  schedule         MasterSchedule[]
+
+  // Выходные / отпуска / исключения
+  daysOff          MasterDayOff[]
 }
 
+//
+// Услуги
+//
 model Service {
-  id               Int        @id @default(autoincrement())
+  id               Int       @id @default(autoincrement())
   title            String
   shortDescription String?
   fullDescription  String?
   price            Int
-  durationMinutes  Int
+  durationMinutes  Int       // время выполнения услуги
   photoUrl         String?
 
   appointments Appointment[]
 }
 
+//
+// Регулярное расписание мастера (Пн–Пт 10:00–18:00 и т.п.)
+//
+model MasterSchedule {
+  id        Int      @id @default(autoincrement())
+  master    User     @relation(fields: [masterId], references: [id])
+  masterId  Int
+
+  dayOfWeek Int      // 0–6 (0 = Sunday)
+  startTime String   // "09:00"
+  endTime   String   // "18:00"
+}
+
+//
+// Выходные / отпуска мастера
+// (конкретные даты, когда мастер НЕ работает)
+//
+model MasterDayOff {
+  id        Int      @id @default(autoincrement())
+  master    User     @relation(fields: [masterId], references: [id])
+  masterId  Int
+
+  date      DateTime // пример: "2025-01-28"
+}
+
+//
+// Запись клиента к мастеру на услугу
+//
 model Appointment {
   id        Int       @id @default(autoincrement())
-  
-  // кто записался (клиент)
+
+  // Клиент
   user      User      @relation("UserAppointments", fields: [userId], references: [id])
   userId    Int
 
-  // к кому записались (мастер)
+  // Мастер
   master    User      @relation("MasterAppointments", fields: [masterId], references: [id])
   masterId  Int
 
-  // какую услугу выбрали
+  // Услуга
   service   Service   @relation(fields: [serviceId], references: [id])
   serviceId Int
 
-  date      DateTime
-  time      DateTime
+  // Дата и время записи
+  date      DateTime  // только дата
+  time      String    // пример: "15:00"
+
   status    String    @default("pending")
   createdAt DateTime  @default(now())
 }
