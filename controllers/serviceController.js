@@ -12,7 +12,7 @@ const getAllServices = async (req, res) => {
     res.status(500).json({ error: "Не удалось получить список услуг" });
   }
 };
-
+// Конвертация HH:MM → минуты
 function timeToMinutes(time) {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
@@ -130,4 +130,5 @@ const getServiceAvailability = async (req, res) => {
     res.status(500).json({ error: "Ошибка сервера" });
   }
 };
+
 module.exports = { getAllServices, getServiceAvailability };
