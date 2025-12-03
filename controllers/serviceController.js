@@ -3,102 +3,131 @@ const prisma = require("../config/prisma");
 // Получение всех услуг
 const getAllServices = async (req, res) => {
   try {
-    const services = await prisma.service.findMany({ orderBy: { title: "asc" } });
+    const services = await prisma.service.findMany({
+      orderBy: { title: "asc" },
+    });
     res.json({ data: services });
   } catch (error) {
-    console.error(error);
+    console.error("Ошибка при получении услуг:", error);
     res.status(500).json({ error: "Не удалось получить список услуг" });
   }
 };
 
-// "HH:MM" → минуты
 function timeToMinutes(time) {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
 }
 
-// минуты → "HH:MM"
+// минуты → HH:MM
 function minutesToTime(mins) {
-  const h = String(Math.floor(mins / 60)).padStart(2, "0");
-  const m = String(mins % 60).padStart(2, "0");
-  return `${h}:${m}`;
+  return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
 }
 
-// Проверка пересечения интервалов
-function isOverlap(start1, end1, start2, end2) {
-  return start1 < end2 && start2 < end1;
+// округление вверх до ближайшего шага (15/30 минут)
+function roundUpToStep(mins, step) {
+  return Math.ceil(mins / step) * step;
 }
 
-// Получение доступных слотов
+const SLOT_STEP = 30; // шаг слотов (30 минут)
+
+// ----------------------------------------------------
+
 const getServiceAvailability = async (req, res) => {
   try {
     const serviceId = parseInt(req.params.id);
-    const { masterId, date } = req.query;
-    if (!masterId || !date) return res.status(400).json({ error: "Не указан masterId или date" });
+    const masterId = parseInt(req.query.masterId);
+    const date = req.query.date;
 
-    const service = await prisma.service.findUnique({ where: { id: serviceId } });
+    if (!serviceId || !masterId || !date) {
+      return res.status(400).json({ error: "Не указан serviceId, masterId или date" });
+    }
+
+    // 1) Находим услугу
+    const service = await prisma.service.findUnique({
+      where: { id: serviceId }
+    });
     if (!service) return res.status(404).json({ error: "Услуга не найдена" });
 
+    // 2) Находим мастера и его расписание
+    const day = new Date(date).getDay();
+
     const master = await prisma.user.findUnique({
-      where: { id: parseInt(masterId) },
+      where: { id: masterId },
       include: {
-        schedule: { where: { dayOfWeek: new Date(date).getDay() } },
-        daysOff: { where: { date: new Date(date) } },
-      },
+        schedule: { where: { dayOfWeek: day } },
+        daysOff: { where: { date: new Date(date) } }
+      }
     });
 
+    // Если мастер не работает в этот день или выходной → нет слотов
     if (!master || master.schedule.length === 0 || master.daysOff.length > 0) {
-      return res.json({ service, slots: [] });
+      return res.json({ service, master, slots: [] });
     }
 
     const schedule = master.schedule[0];
     const scheduleStart = timeToMinutes(schedule.startTime);
     const scheduleEnd = timeToMinutes(schedule.endTime);
 
-    // Апоинтменты мастера на этот день
+    // 3) Получаем апоинтменты мастера за этот день
     const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
+    startOfDay.setHours(0,0,0,0);
     const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    endOfDay.setHours(23,59,59,999);
 
     const appointments = await prisma.appointment.findMany({
-      where: { masterId: master.id, date: { gte: startOfDay, lte: endOfDay } },
-      include: { service: true },
+      where: {
+        masterId: masterId,
+        date: { gte: startOfDay, lte: endOfDay }
+      },
+      include: { service: true }
     });
 
-    // Интервалы занятых апоинтментов
-    const busyIntervals = appointments.map(a => {
+    // 4) Строим массив занятых интервалов
+    const busy = appointments.map(a => {
       const start = timeToMinutes(a.time);
       const end = start + a.service.durationMinutes;
       return { start, end };
     });
 
-    // Добавим фиктивные границы рабочего дня
-    busyIntervals.push({ start: 0, end: scheduleStart });
-    busyIntervals.push({ start: scheduleEnd, end: 24 * 60 });
+    // Добавляем границы рабочего дня (для поиска дыр)
+    busy.push({ start: 0, end: scheduleStart });
+    busy.push({ start: scheduleEnd, end: 1440 });
 
-    // Сортируем интервалы по началу
-    busyIntervals.sort((a, b) => a.start - b.start);
+    busy.sort((a, b) => a.start - b.start);
 
-    const slots = [];
+    // 5) Генерируем свободные промежутки
+    const freeIntervals = [];
+    for (let i = 0; i < busy.length - 1; i++) {
+      const freeStart = busy[i].end;
+      const freeEnd = busy[i+1].start;
 
-    // Генерируем свободные интервалы между занятыми
-    for (let i = 0; i < busyIntervals.length - 1; i++) {
-      const freeStart = busyIntervals[i].end;
-      const freeEnd = busyIntervals[i + 1].start;
-
-      let current = freeStart;
-      while (current + service.durationMinutes <= freeEnd) {
-        slots.push(minutesToTime(current));
-        current += 1; // шаг 1 минута
+      // свободный интервал внутри рабочего дня
+      if (freeEnd > freeStart) {
+        freeIntervals.push({ start: freeStart, end: freeEnd });
       }
     }
 
-    res.json({ service, master: { id: master.id, name: master.name }, slots });
+    // 6) Генерация красивых слотов с шагом SLOT_STEP
+    const slots = [];
+
+    freeIntervals.forEach(interval => {
+      let current = roundUpToStep(interval.start, SLOT_STEP);
+
+      while (current + service.durationMinutes <= interval.end) {
+        slots.push(minutesToTime(current));
+        current += SLOT_STEP;
+      }
+    });
+
+    return res.json({
+      service,
+      master: { id: master.id, name: master.name },
+      slots
+    });
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Ошибка при получении доступного времени" });
+    console.error("Ошибка получения слотов:", err);
+    res.status(500).json({ error: "Ошибка сервера" });
   }
 };
-
 module.exports = { getAllServices, getServiceAvailability };
