@@ -20,19 +20,22 @@ enum Role {
 // Пользователи: клиенты и мастера
 //
 model User {
-  id           Int       @id @default(autoincrement())
-  email        String?   @unique
-  name         String?
-  passwordHash String?
-  role         Role      @default(USER)
-  photoUrl     String?
-  createdAt    DateTime  @default(now())
+  id               Int                @id @default(autoincrement())
+  email            String?            @unique
+  name             String?
+  passwordHash     String?
+  role             Role               @default(USER)
+  photoUrl         String?
+  createdAt        DateTime           @default(now())
 
   // Записи клиента
-  appointments     Appointment[] @relation("UserAppointments")
+  appointments     Appointment[]      @relation("UserAppointments")
 
   // Записи к мастеру
-  masterBookings   Appointment[] @relation("MasterAppointments")
+  masterBookings   Appointment[]      @relation("MasterAppointments")
+
+  // 💡 Временные резервы, созданные пользователем
+  cartReservations CartReservation[]  @relation("UserCartReservations") // Используем то же имя!
 
   // Регулярное расписание мастера
   schedule         MasterSchedule[]
@@ -45,28 +48,29 @@ model User {
 // Услуги
 //
 model Service {
-  id               Int       @id @default(autoincrement())
-  title            String
-  shortDescription String?
-  fullDescription  String?
-  price            Int
-  durationMinutes  Int       // время выполнения услуги
-  photoUrl         String?
+  id                Int                @id @default(autoincrement())
+  title             String
+  shortDescription  String?
+  fullDescription   String?
+  price             Int
+  durationMinutes   Int                // время выполнения услуги
+  photoUrl          String?
 
-  appointments Appointment[]
+  appointments      Appointment[]
+  cartReservations  CartReservation[] 
 }
 
 //
 // Регулярное расписание мастера (Пн–Пт 10:00–18:00 и т.п.)
 //
 model MasterSchedule {
-  id        Int      @id @default(autoincrement())
-  master    User     @relation(fields: [masterId], references: [id])
-  masterId  Int
+  id         Int      @id @default(autoincrement())
+  master     User     @relation(fields: [masterId], references: [id])
+  masterId   Int
 
-  dayOfWeek Int      // 0–6 (0 = Sunday)
-  startTime String   // "09:00"
-  endTime   String   // "18:00"
+  dayOfWeek  Int      // 0–6 (0 = Sunday)
+  startTime  String   // "09:00"
+  endTime    String   // "18:00"
 }
 
 //
@@ -74,35 +78,64 @@ model MasterSchedule {
 // (конкретные даты, когда мастер НЕ работает)
 //
 model MasterDayOff {
-  id        Int      @id @default(autoincrement())
-  master    User     @relation(fields: [masterId], references: [id])
-  masterId  Int
+  id         Int      @id @default(autoincrement())
+  master     User     @relation(fields: [masterId], references: [id])
+  masterId   Int
 
-  date      DateTime // пример: "2025-01-28"
+  date       DateTime // пример: "2025-01-28"
 }
 
 //
 // Запись клиента к мастеру на услугу
 //
 model Appointment {
-  id        Int       @id @default(autoincrement())
+  id         Int      @id @default(autoincrement())
 
   // Клиент
-  user      User      @relation("UserAppointments", fields: [userId], references: [id])
-  userId    Int
+  user       User     @relation("UserAppointments", fields: [userId], references: [id])
+  userId     Int
 
   // Мастер
-  master    User      @relation("MasterAppointments", fields: [masterId], references: [id])
-  masterId  Int
+  master     User     @relation("MasterAppointments", fields: [masterId], references: [id])
+  masterId   Int
 
   // Услуга
-  service   Service   @relation(fields: [serviceId], references: [id])
-  serviceId Int
+  service    Service  @relation(fields: [serviceId], references: [id])
+  serviceId  Int
 
   // Дата и время записи
-  date      DateTime  // только дата
-  time      String    // пример: "15:00"
+  date       DateTime // только дата
+  time       String   // пример: "15:00"
 
-  status    String    @default("pending")
-  createdAt DateTime  @default(now())
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+}
+
+//
+// Временное резервирование слотов, пока услуга лежит в корзине (30 минут блокировки)
+//
+model CartReservation {
+  id               Int      @id @default(autoincrement())
+
+  // Идентификация забронированного слота
+  masterId         Int
+  date             DateTime
+  time             String   // Пример: "15:00"
+
+  // 💡 НОВОЕ: Услуга, которую резервируют (для получения durationMinutes)
+  serviceId        Int
+  service          Service  @relation(fields: [serviceId], references: [id])
+
+  // Время, когда резерв истекает (например, через 30 минут)
+  expiresAt        DateTime
+
+  // Клиент, который держит резерв (для безопасности)
+  reservedByUserId Int
+
+  // Отношение к пользователю
+  user             User     @relation("UserCartReservations", fields: [reservedByUserId], references: [id])
+  
+  // Добавляем индекс для быстрого поиска и уникальности:
+  // Мастер не может иметь два активных резерва на одно и то же время
+  @@unique([masterId, date, time])
 }

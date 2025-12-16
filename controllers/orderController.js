@@ -11,17 +11,25 @@ const makeAnAppointment = async (req, res) => {
           "Missing required fields: masterId, serviceId, date, and time are required.",
       });
     }
-    const newAppointment = await prisma.appointment.create({
-      data: {
-        userId: clientUserId, 
-        masterId: parseInt(masterId),
-        serviceId: parseInt(serviceId),
-       
-        date: new Date(date),
-        time: new Date(time),
-        status: "pending", 
-      },
-    });
+    await prisma.cartReservation.deleteMany({
+             where: {
+                masterId: parseInt(masterId),
+                date: new Date(date),
+                time: time,
+                reservedByUserId: clientUserId,
+            },
+            // Мы игнорируем, если резерв не найден (пользователь мог удалить его или он истек)
+        });
+   const newAppointment = await prisma.appointment.create({
+            data: {
+                userId: clientUserId, 
+                masterId: parseInt(masterId),
+                serviceId: parseInt(serviceId),
+                date: new Date(date),
+                time: time, // Используем строку времени
+                status: "confirmed", // Меняем статус на confirmed или используйте ваш "pending"
+            },
+        });
     res.status(201).json({
       message: "Appointment successfully created.",
       appointment: newAppointment,
