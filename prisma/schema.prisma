@@ -89,53 +89,38 @@ model MasterDayOff {
 // Запись клиента к мастеру на услугу
 //
 model Appointment {
-  id         Int      @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  masterId  Int
+  serviceId Int
+  date      DateTime
+  time      String
+  price     Float   
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
 
-  // Клиент
-  user       User     @relation("UserAppointments", fields: [userId], references: [id])
-  userId     Int
-
-  // Мастер
-  master     User     @relation("MasterAppointments", fields: [masterId], references: [id])
-  masterId   Int
-
-  // Услуга
-  service    Service  @relation(fields: [serviceId], references: [id])
-  serviceId  Int
-
-  // Дата и время записи
-  date       DateTime // только дата
-  time       String   // пример: "15:00"
-
-  status     String   @default("pending")
-  createdAt  DateTime @default(now())
+  user      User     @relation("UserAppointments", fields: [userId], references: [id])
+  master    User     @relation("MasterAppointments", fields: [masterId], references: [id])
+  service   Service  @relation(fields: [serviceId], references: [id])
 }
 
-//
-// Временное резервирование слотов, пока услуга лежит в корзине (30 минут блокировки)
-//
+
 model CartReservation {
   id               Int      @id @default(autoincrement())
 
-  // Идентификация забронированного слота
   masterId         Int
   date             DateTime
-  time             String   // Пример: "15:00"
+  time             String   
 
-  // 💡 НОВОЕ: Услуга, которую резервируют (для получения durationMinutes)
   serviceId        Int
   service          Service  @relation(fields: [serviceId], references: [id])
 
-  // Время, когда резерв истекает (например, через 30 минут)
   expiresAt        DateTime
 
-  // Клиент, который держит резерв (для безопасности)
   reservedByUserId Int
 
-  // Отношение к пользователю
   user             User     @relation("UserCartReservations", fields: [reservedByUserId], references: [id])
   
-  // Добавляем индекс для быстрого поиска и уникальности:
-  // Мастер не может иметь два активных резерва на одно и то же время
+
   @@unique([masterId, date, time])
 }

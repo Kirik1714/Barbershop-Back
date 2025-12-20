@@ -3,48 +3,54 @@ const prisma = require("../config/prisma");
 
 const makeAnAppointment = async (req, res) => {
   const clientUserId = req.user.userId;
+  const { items } = req.body; // Получаем массив Order[]
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: "Cart is empty." });
+  }
+
   try {
-    const { masterId, serviceId, date, time } = req.body;
-    if (!masterId || !serviceId || !date || !time) {
-      return res.status(400).json({
-        message:
-          "Missing required fields: masterId, serviceId, date, and time are required.",
-      });
-    }
-    await prisma.cartReservation.deleteMany({
-             where: {
-                masterId: parseInt(masterId),
-                date: new Date(date),
-                time: time,
-                reservedByUserId: clientUserId,
-            },
-            // Мы игнорируем, если резерв не найден (пользователь мог удалить его или он истек)
+    const result = await prisma.$transaction(async (tx) => {
+      const createdAppointments = [];
+
+      for (const item of items) {
+     
+        await tx.cartReservation.deleteMany({
+          where: {
+            masterId: parseInt(item.masterId),
+            date: new Date(item.date),
+            time: item.time,
+            reservedByUserId: clientUserId,
+          },
         });
-   const newAppointment = await prisma.appointment.create({
-            data: {
-                userId: clientUserId, 
-                masterId: parseInt(masterId),
-                serviceId: parseInt(serviceId),
-                date: new Date(date),
-                time: time, // Используем строку времени
-                status: "confirmed", // Меняем статус на confirmed или используйте ваш "pending"
-            },
+
+        // 2. Создаем постоянную запись в Appointment
+        const appointment = await tx.appointment.create({
+          data: {
+            userId: clientUserId,
+            masterId: parseInt(item.masterId),
+            serviceId: parseInt(item.id), // Твой интерфейс: id -> serviceId
+            date: new Date(item.date),
+            time: item.time,
+            price: parseFloat(item.servicePrice), // Твой интерфейс: servicePrice -> price
+            status: "confirmed",
+          },
         });
+        
+        createdAppointments.push(appointment);
+      }
+
+      return createdAppointments;
+    });
+
     res.status(201).json({
-      message: "Appointment successfully created.",
-      appointment: newAppointment,
+      message: "Order finalized successfully",
+      count: result.length,
+      appointments: result,
     });
   } catch (error) {
-    console.error("Error creating appointment:", error);
-
-    // Обработка ошибок Prisma (например, если masterId или serviceId не существует)
-    if (error.code === "P2003") {
-      return res
-        .status(404)
-        .json({ message: "Master or Service ID not found." });
-    }
-
-    res.status(500).json({ message: "Failed to create appointment." });
+    console.error("Order completion error:", error);
+    res.status(500).json({ message: "Failed to process the order." });
   }
 };
 
