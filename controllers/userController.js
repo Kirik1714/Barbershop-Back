@@ -10,11 +10,13 @@ const registerUser = async (req, res) => {
     const existingUser = await prisma.user.findFirst({
       where: { email },
     });
+
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
+
     const user = await prisma.user.create({
       data: {
         name,
@@ -23,19 +25,25 @@ const registerUser = async (req, res) => {
         role: "USER",
       },
     });
+
+    // Генерируем токен
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "30d" } // токен действителен 30d
+      { expiresIn: "30d" }
     );
+
+    // Убираем пароль из объекта перед отправкой
+    const { passwordHash: _, ...userWithoutPassword } = user;
+
     res.status(201).json({
       message: "User created",
-      userId: user.id,
       token,
+      user: userWithoutPassword, 
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "The user didnt create" });
+    res.status(500).json({ message: "The user didn't create" });
   }
 };
 
@@ -43,33 +51,33 @@ const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1. Найти пользователя по email
     const user = await prisma.user.findFirst({
       where: { email },
     });
 
     if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" }); // Неверные учетные данные
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // 2. Сравнить пароли
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
 
     if (!isPasswordValid) {
-      return res.status(401).json({ message: "Invalid credentials" }); // Неверные учетные данные
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // 3. Выдать JWT
     const token = jwt.sign(
       { userId: user.id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "30d" } // Используйте то же время жизни, что и для регистрации
+      { expiresIn: "30d" }
     );
+
+    // Убираем пароль из объекта перед отправкой
+    const { passwordHash: _, ...userWithoutPassword } = user;
 
     res.status(200).json({
       message: "Login successful",
-      userId: user.id,
       token,
+      user: userWithoutPassword, // Возвращаем объект пользователя
     });
   } catch (error) {
     console.error(error);
@@ -89,9 +97,28 @@ const getMaster = async(req,res)=>{
         res.status(500).json({ error: 'Не удалось получить мастеров' });
   }
 }
+const getMe = async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+    });
 
+    if (!user) {
+      return res.status(404).json({ message: "Пользователь не найден" });
+    }
+
+    // Убираем пароль перед отправкой
+    const { passwordHash: _, ...userWithoutPassword } = user;
+
+    res.status(200).json(userWithoutPassword);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Ошибка при получении данных пользователя" });
+  }
+};
 module.exports = {
   registerUser,
   loginUser,
-  getMaster
+  getMaster,
+  getMe,
 };
