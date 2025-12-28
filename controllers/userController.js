@@ -116,9 +116,45 @@ const getMe = async (req, res) => {
     res.status(500).json({ message: "Ошибка при получении данных пользователя" });
   }
 };
+
+const getMyAppointments = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const appointments = await prisma.appointment.findMany({
+  where: {
+    userId: userId,
+  },
+  include: {
+    master: {
+      select: {
+        name: true,
+        photoUrl: true,
+      },
+    },
+    service: {
+      select: {
+        title: true, // Заменил name на title
+        price: true,
+      },
+    },
+  },
+  orderBy: {
+    createdAt: 'desc',
+  },
+});
+
+    res.status(200).json(appointments);
+  } catch (error) {
+    console.error("Ошибка при получении записей:", error);
+    res.status(500).json({ message: "Не удалось загрузить ваши записи" });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   getMaster,
   getMe,
+  getMyAppointments,
 };
