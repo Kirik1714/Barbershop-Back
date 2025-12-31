@@ -76,6 +76,7 @@ const getServiceAvailability = async (req, res) => {
       where: {
         masterId: masterId,
         date: { gte: startOfDay, lte: endOfDay },
+        status: { not: 'cancelled' }
       },
       include: { service: true },
     }); // 3.2) АКТИВНЫЕ РЕЗЕРВЫ (CartReservation)

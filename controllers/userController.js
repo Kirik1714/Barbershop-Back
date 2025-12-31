@@ -151,10 +151,48 @@ const getMyAppointments = async (req, res) => {
   }
 };
 
+const cancelAppointment = async (req, res) => {
+  try {
+    const { id } = req.params; // ID записи, которую хотим отменить
+    const userId = req.user.userId; // ID пользователя из токена
+
+    // 1. Сначала ищем запись, чтобы проверить, принадлежит ли она этому юзеру
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: Number(id) },
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ message: "Запись не найдена" });
+    }
+
+    // 2. Проверка безопасности: не даем отменить чужую запись
+    if (appointment.userId !== userId) {
+      return res.status(403).json({ message: "У вас нет прав для отмены этой записи" });
+    }
+
+    // 3. Обновляем статус
+    const updatedAppointment = await prisma.appointment.update({
+      where: { id: Number(id) },
+      data: {
+        status: "cancelled", // Меняем статус на "отменено"
+      },
+    });
+
+    res.status(200).json({ 
+      message: "Запись успешно отменена", 
+      appointment: updatedAppointment 
+    });
+  } catch (error) {
+    console.error("Ошибка при отмене записи:", error);
+    res.status(500).json({ message: "Не удалось отменить запись" });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   getMaster,
   getMe,
   getMyAppointments,
+  cancelAppointment
 };
