@@ -1,7 +1,13 @@
 const prisma = require("../config/prisma");
 const bcrypt = require("bcrypt");
+const {
+  parse,
+  format,
+  startOfMonth,
+  endOfMonth,
+  addMinutes,
+} = require("date-fns");
 const jwt = require("jsonwebtoken");
-
 
 const registerUser = async (req, res) => {
   try {
@@ -39,7 +45,7 @@ const registerUser = async (req, res) => {
     res.status(201).json({
       message: "User created",
       token,
-      user: userWithoutPassword, 
+      user: userWithoutPassword,
     });
   } catch (error) {
     console.error(error);
@@ -85,18 +91,18 @@ const loginUser = async (req, res) => {
   }
 };
 
-const getMaster = async(req,res)=>{
+const getMaster = async (req, res) => {
   try {
-    const masters =await prisma.user.findMany({
-      where:{role:'MASTER'}
+    const masters = await prisma.user.findMany({
+      where: { role: "MASTER" },
     });
-    return res.json({data:masters})
+    return res.json({ data: masters });
   } catch (error) {
-      console.error('Ошибка при получении мастеров:', error);
-    
-        res.status(500).json({ error: 'Не удалось получить мастеров' });
+    console.error("Ошибка при получении мастеров:", error);
+
+    res.status(500).json({ error: "Не удалось получить мастеров" });
   }
-}
+};
 const getMe = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -113,7 +119,9 @@ const getMe = async (req, res) => {
     res.status(200).json(userWithoutPassword);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Ошибка при получении данных пользователя" });
+    res
+      .status(500)
+      .json({ message: "Ошибка при получении данных пользователя" });
   }
 };
 
@@ -122,27 +130,27 @@ const getMyAppointments = async (req, res) => {
     const userId = req.user.userId;
 
     const appointments = await prisma.appointment.findMany({
-  where: {
-    userId: userId,
-  },
-  include: {
-    master: {
-      select: {
-        name: true,
-        photoUrl: true,
+      where: {
+        userId: userId,
       },
-    },
-    service: {
-      select: {
-        title: true, // Заменил name на title
-        price: true,
+      include: {
+        master: {
+          select: {
+            name: true,
+            photoUrl: true,
+          },
+        },
+        service: {
+          select: {
+            title: true, // Заменил name на title
+            price: true,
+          },
+        },
       },
-    },
-  },
-  orderBy: {
-    createdAt: 'desc',
-  },
-});
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
     res.status(200).json(appointments);
   } catch (error) {
@@ -167,7 +175,9 @@ const cancelAppointment = async (req, res) => {
 
     // 2. Проверка безопасности: не даем отменить чужую запись
     if (appointment.userId !== userId) {
-      return res.status(403).json({ message: "У вас нет прав для отмены этой записи" });
+      return res
+        .status(403)
+        .json({ message: "У вас нет прав для отмены этой записи" });
     }
 
     // 3. Обновляем статус
@@ -178,13 +188,119 @@ const cancelAppointment = async (req, res) => {
       },
     });
 
-    res.status(200).json({ 
-      message: "Запись успешно отменена", 
-      appointment: updatedAppointment 
+    res.status(200).json({
+      message: "Запись успешно отменена",
+      appointment: updatedAppointment,
     });
   } catch (error) {
     console.error("Ошибка при отмене записи:", error);
     res.status(500).json({ message: "Не удалось отменить запись" });
+  }
+};
+const getMasterSchedule = async (req, res) => {
+  try {
+    const { masterId } = req.params;
+    const { month } = req.query;
+
+    if (!month || typeof month !== "string") {
+      return res
+        .status(400)
+        .json({ error: "Параметр month (YYYY-MM) обязателен" });
+    }
+
+    // 1. Вычисляем точные границы месяца для БД
+    const monthDate = parse(month, "yyyy-MM", new Date());
+    const firstDay = startOfMonth(monthDate);
+    const lastDay = endOfMonth(monthDate);
+
+    // 2. Параллельно запрашиваем Записи и Брони в корзине (оптимизация скорости)
+    const [appointments, reservations] = await Promise.all([
+      // Подтвержденные или ожидающие записи
+      prisma.appointment.findMany({
+        where: {
+          masterId: Number(masterId),
+          date: { gte: firstDay, lte: lastDay },
+          status: { not: "cancelled" }
+        },
+        include: {
+          user: { select: { name: true } },
+          service: { select: { title: true, durationMinutes: true } },
+        },
+      }),
+      // Временные резервы из корзины
+      prisma.cartReservation.findMany({
+        where: {
+          masterId: Number(masterId),
+          date: { gte: firstDay, lte: lastDay },
+          expiresAt: { gte: new Date() }, // Только те, что еще не истекли
+        },
+        include: {
+          service: { select: { title: true, durationMinutes: true } },
+        },
+      }),
+    ]);
+
+    const groupedData = {};
+
+    // Функция-помощник для форматирования в объект
+    const addToGroup = (
+      date,
+      time,
+      duration,
+      title,
+      summary,
+      isReservation
+    ) => {
+      const dateKey = format(date, "yyyy-MM-dd");
+      const startStr = `${dateKey} ${time}:00`;
+
+      const startParsed = parse(startStr, "yyyy-MM-dd HH:mm:ss", new Date());
+      const endStr = format(
+        addMinutes(startParsed, duration),
+        "yyyy-MM-dd HH:mm:ss"
+      );
+
+      if (!groupedData[dateKey]) groupedData[dateKey] = [];
+
+      groupedData[dateKey].push({
+        start: startStr,
+        end: endStr,
+        title: title,
+        summary: summary,
+        // Резервы красим в нейтральный цвет, записи — в основной
+        color: isReservation ? "#F2F2F2" : "#E6F2FF",
+        isReservation, // флаг для фронтенда
+      });
+    };
+
+    // Обрабатываем основные записи
+    appointments.forEach((a) =>
+      addToGroup(
+        a.date,
+        a.time,
+        a.service.durationMinutes,
+        a.user.name || "Клиент",
+        a.service.title,
+        false
+      )
+    );
+
+    // Обрабатываем брони из корзины
+    reservations.forEach((r) =>
+      addToGroup(
+        r.date,
+        r.time,
+        r.service.durationMinutes,
+        "В корзине",
+        r.service.title,
+        true
+      )
+    );
+
+    res.json(groupedData);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Ошибка сервера" });
   }
 };
 
@@ -194,5 +310,6 @@ module.exports = {
   getMaster,
   getMe,
   getMyAppointments,
-  cancelAppointment
+  cancelAppointment,
+  getMasterSchedule,
 };
