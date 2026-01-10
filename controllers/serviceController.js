@@ -3,10 +3,28 @@ const RESERVATION_DURATION_MS = 30 * 60 * 1000;
 // Получение всех услуг
 const getAllServices = async (req, res) => {
   try {
+    const limit = parseInt(req.query.limit) || 4;
+    const page = parseInt(req.query.page) || 0;
+    const search =req.query.search || '';
+    const totalCount = await prisma.service.count({
+      where: { title: { contains: search, mode: 'insensitive' } }
+    });
     const services = await prisma.service.findMany({
+      take:limit,
+      skip:page*limit,
+      where:{
+        title:{
+          contains:search,
+          mode:'insensitive',
+        }
+      },
       orderBy: { title: "asc" },
     });
-    res.json({ data: services });
+   res.json({ 
+      data: services,
+      hasMore: (page + 1) * limit < totalCount,
+      totalCount: totalCount
+    });
   } catch (error) {
     console.error("Ошибка при получении услуг:", error);
     res.status(500).json({ error: "Не удалось получить список услуг" });
